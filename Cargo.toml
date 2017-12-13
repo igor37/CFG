@@ -1,0 +1,7 @@
+[package]
+name = "cfg"
+version = "0.1.0"
+authors = ["igorharden <i.harden@gmx.at>"]
+
+[dependencies]
+rand = "0.3"
