@@ -2,6 +2,11 @@
 extern crate rand;
 use self::rand::Rng;
 
+use std::fs::File;
+use std::io::prelude::*;
+use std::io::BufReader;
+use std::path::Path;
+
 #[macro_export]
 macro_rules! from_expr {
     ( $x:expr, $y:expr ) => {
@@ -58,6 +63,32 @@ fn new_order(order: Order, n: usize) -> Order {
     }
 }
 
+// for stuff loaded from file
+struct CfgData {
+    pub order: Order,
+    pub num: u32,
+    pub max_depth: u32,
+    pub separator: String,
+    pub rules: Vec<String>,
+}
+
+impl CfgData {
+    fn new() -> Self {
+        CfgData {
+            order: ascending_order(),
+            num: 0,
+            max_depth: 10,
+            separator: ";".to_string(),
+            rules: Vec::new()
+        }
+    }
+    // checks if all necessary values were set and at least one rule was added
+    fn are_complete(&self) -> bool {
+        if self.num == 0 || self.rules.len() == 0 { return false; }
+        true
+    }
+}
+
 /// A context-free grammar containing a set of rules. Can generate and return a
 /// set of words belonging to this grammar.
 #[derive(Clone)]
@@ -65,6 +96,9 @@ pub struct ContextFreeGrammar {
     rules: Vec<CfgRule>,
     non_terminals: Vec<Symbol>,
     start: Option<Symbol>,
+    order: Order,
+    num:   u32,
+    max_depth: u32,
 }
 
 impl ContextFreeGrammar {
@@ -73,8 +107,143 @@ impl ContextFreeGrammar {
             rules:   Vec::new(),
             non_terminals: Vec::new(),
             start: None,
+            order: ascending_order(),
+            num: 0,
+            max_depth: 10,
         }
     }
+
+    pub fn from_file(path: &str) -> Option<Self> {
+        // open file and create buffered reader
+        let f = match File::open(&Path::new(path)) {
+            Err(e) => {
+                println!("CFG::from_file(): {}", e);
+                return None;
+            },
+            Ok(f)  => f,
+        };
+        let mut reader = BufReader::new(f);
+        let mut line = String::new();
+        let mut len;
+
+        let mut data = CfgData::new();
+
+        // read metadata
+        loop {
+            match reader.read_line(&mut line) {
+                Err(e)  => {
+                    println!("CFG::from_file(): {}", e);
+                    return None;
+                },
+                Ok(l)   => len = l,
+            }
+            if len == 0 { break; }
+
+            ContextFreeGrammar::parse_line(&line, &mut data);
+
+            line.clear();
+        }
+
+        if !data.are_complete() { return None; }
+
+        // parse & add rules
+        let sep = data.separator;
+        let mut rules: Vec<CfgRule> = data.rules.into_iter()
+            .map(|r| CfgRule::from_expression(r, sep.clone(), false))
+            .filter(|opt| opt.is_some())
+            .map(|opt| opt.unwrap())
+            .collect();
+        rules[0].make_starting_rule();
+
+        let mut cfg = ContextFreeGrammar::new();
+        for i in 0..rules.len() {
+            cfg.add_rule(rules[i].clone());
+        }
+        // other parameters
+        cfg.set_order(data.order);
+        cfg.set_num(data.num);
+        cfg.set_max_depth(data.max_depth);
+
+        Some(cfg)
+    }
+
+    fn parse_line(l: &String, data: &mut CfgData) {
+        let order_str = "order";
+        let asc_str   = "ascending";
+        let rnd_str   = "random";
+        let sep_str   = "separator";
+        let num_str   = "words";
+        let depth_str = "maxdepth";
+
+        let line = l.replace("\n", "");
+
+        if line.trim().starts_with("#") { return; } // comment
+        if line.trim().len() < 2 { return; } // empty line
+        if line.starts_with(order_str) {
+            let parts: Vec<String> = line.split("=")
+                .map(|p| p.trim())
+                .map(|p| p.to_string())
+                .collect();
+            if parts.len() < 2 { println!("no argument in line '{}'", line); return; }
+            if parts[1].contains(asc_str) {
+                data.order = ascending_order();
+                return;
+            } else if parts[1].contains(rnd_str) {
+                data.order = random_order();
+                return;
+            } else {
+                println!("Ignoring line '{}': no valid order detected", line);
+                return;
+            }
+        }
+        if line.starts_with(sep_str) {
+            let parts: Vec<String> = line.split("=")
+                .map(|p| p.trim())
+                .map(|p| p.to_string())
+                .collect();
+            if parts.len() < 2 { println!("no argument in line '{}'", line); return; }
+            data.separator = parts[1].clone();
+            return;
+        }
+        if line.starts_with(num_str) {
+            let parts: Vec<String> = line.split("=")
+                .map(|p| p.trim())
+                .map(|p| p.to_string())
+                .collect();
+            if parts.len() < 2 { println!("no argument in line '{}'", line); return; }
+            let num = match parts[1].parse::<u32>() {
+                Err(_) => {
+                    println!("Error in line '{}': no valid integer", line);
+                    return;
+                },
+                Ok(n)  => n,
+            };
+            data.num = num;
+            return;
+        }
+        if line.starts_with(depth_str) {
+            let parts: Vec<String> = line.split("=")
+                .map(|p| p.trim())
+                .map(|p| p.to_string())
+                .collect();
+            if parts.len() < 2 { println!("no argument in line '{}'", line); return; }
+            let dep = match parts[1].parse::<u32>() {
+                Err(_) => {
+                    println!("Error in line '{}': no valid integer", line);
+                    return;
+                },
+                Ok(d)  => d,
+            };
+            data.max_depth = dep;
+            return;
+        }
+        // else it's a normal rule
+        data.rules.push(line.clone());
+    }
+
+    pub fn set_order(&mut self, order: Order) { self.order = order; }
+    pub fn set_num(&mut self, n: u32) { self.num = n; }
+    pub fn set_max_depth(&mut self, md: u32) { self.max_depth = md; }
 
     /// Adds a `CfgRule` to the grammar
     ///
@@ -111,11 +280,13 @@ impl ContextFreeGrammar {
     /// Generates the given amount of words from this grammar in the given order
     /// and with the given max amount of non-terminal replacements(`max_depth`).
     ///
-    /// If more different words are requested than are possible in this grammar,
-    /// this function will take much longer to terminate with ascending order.
-    /// In the case of random order duplicates are possible(and guaranteed given
-    /// a sufficiently large number of requested words).
-    pub fn generate_strings(&self, mut order: Order, num: u32, max_depth: u32) -> Vec<String> {
+    /// If duplicates are not allowed, this function may return fewer results
+    /// than requested.
+    pub fn generate_strings(&self, allow_dupes: bool) -> Vec<String> {
+        let mut order = self.order;
+        let num = self.num;
+        let max_depth = self.max_depth;
+
         if self.start.is_none() {
             println!("Generating not possible: no starting non-terminal set");
             return Vec::new();
@@ -142,23 +313,19 @@ impl ContextFreeGrammar {
             let remaining_depth = max_depth;
 
             let result = self.generate(order, self.start.clone().unwrap(), remaining_depth);
-            // check for duplicates in ascending order
-            match order {
-                Order::ASCENDING { count: _ } => {   
-                    let redundant = results.contains(&result);
-                    if !redundant {
-                        results.push(result);
-                        n += 1;
-                        successive_dupes = 0;
-                    } else {
-                        successive_dupes += 1;
-                        if successive_dupes >= num { break; }
-                    }
-                },
-                _ => {
+            // check for duplicates
+            if !allow_dupes {
+                let redundant = results.contains(&result);
+                if !redundant {
                     results.push(result);
                     n += 1;
-                },
+                    successive_dupes = 0;
+                } else {
+                    successive_dupes += 1;
+                    if successive_dupes >= num.max(20) { break; }
+                }
+            } else {
+                n += 1;
             }
 
             order = match order {
@@ -212,22 +379,14 @@ pub struct CfgRule {
 }
 
 impl CfgRule {
-    pub fn new(left: Symbol, chains: Vec<SymbolChain>) -> Self {
-        if chains.len() == 0 { panic!("At least 1 possible outcome must exist"); }
-        CfgRule {
-            left: left,
-            outcomes: chains,
-        }
-    }
-
     /// Creates a new rule from a given expression as `String`.
     ///
     /// The syntax must be as follows:
     /// The left side(one non-terminal) is sepated from the right side with "->".
     /// The right side consists of one or more possible outcomes, separated by a
     /// "|" symbol. The (non-)terminals within the rules are separated with any
-    /// other unused string(given as second parameter). Non-terminals should
-    /// be preceded by a "!".
+    /// other unused string not containing space(given as second parameter).
+    /// Non-terminals should be preceded by a "!".
     ///
     /// Examples: "A->a|a,b,B" "the-> dog| cat| adjective, person"
     pub fn from_expression(expr: String, sym_separator: String, starting_rule: bool) -> Option<Self> {
@@ -240,6 +399,7 @@ impl CfgRule {
         let sides: Vec<String> = expr.split("->")
                                         .map(|s| s.to_string())
                                         .collect();
+        if sides.len() < 2 { println!("no right side in rule '{}'", expr); return None; }
         let left = sides[0].clone();
         let right = sides[1].clone();
 
@@ -248,7 +408,10 @@ impl CfgRule {
                                                 .map(|s| s.to_string())
                                                 .collect();
         for i in 0..raw_outcomes.len() {
-            if raw_outcomes[i].len() == 0 { return None; }
+            if raw_outcomes[i].len() == 0 {
+                println!("nothing on right side of rule '{}'", expr);
+                return None;
+            }
 
             let mut symbols = Vec::new();
             let ro = raw_outcomes[i].clone();
@@ -284,6 +447,8 @@ impl CfgRule {
         })
     }
 
+    fn make_starting_rule(&mut self) { self.left.start = true; }
+
     /// Returns the `SymbolChain` at the given index.
     ///
     /// The index cannot be out of bounds.
@@ -307,7 +472,7 @@ pub struct SymbolChain {
 }
 
 impl SymbolChain {
-    pub fn new(s: Vec<Symbol>) -> Self {
+    fn new(s: Vec<Symbol>) -> Self {
         SymbolChain {
             symbols: s,
         }

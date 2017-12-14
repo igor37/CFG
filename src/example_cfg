@@ -1,0 +1,15 @@
+
+order = random
+words = 12
+
+separator = ,
+
+# maximum depth is set to 10 by default. For a different value, use:
+# maxdepth = 10
+
+# RULES
+
+S->!article,!subject,!verb
+article->The|A
+subject-> dog| octopus| person
+verb-> swims in a lake.| eats a burger.
