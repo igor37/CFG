@@ -2,6 +2,21 @@
 extern crate rand;
 use self::rand::Rng;
 
+#[macro_export]
+macro_rules! from_expr {
+    ( $x:expr, $y:expr ) => {
+        CfgRule::from_expression($x.to_string(), $y.to_string(), false).unwrap()
+    }
+}
+#[macro_export]
+macro_rules! from_start_expr {
+    ( $x:expr, $y:expr ) => {
+        CfgRule::from_expression($x.to_string(), $y.to_string(), true).unwrap()
+    }
+}
+
+/// A `Symbol` is a terminal or nonterminal with an arbitrary length,
+/// represented as String.
 #[derive(Clone, Debug)]
 pub struct Symbol {
     pub terminal: bool,
@@ -10,14 +25,6 @@ pub struct Symbol {
 }
 
 impl Symbol {
-    fn new_empty() -> Self {
-        Symbol {
-            terminal: true,
-            start:    false,
-            label:    "".to_string(),
-        }
-    }
-
     fn is_terminal(&self) -> bool {
         self.terminal
     }
@@ -32,6 +39,8 @@ pub enum Order {
 pub fn ascending_order() -> Order { Order::ASCENDING { count: 0 } }
 pub fn random_order() -> Order { Order::RANDOM }
 
+// This way of using a counting variable for varying the output in ascending
+// order is not ideal or efficient(produces MANY duplicates) but it works.
 fn init_idx(order: Order, n: usize) -> usize {
     match order {
         Order::ASCENDING{count: c}  => return c % n,
@@ -41,17 +50,16 @@ fn init_idx(order: Order, n: usize) -> usize {
 
 fn new_order(order: Order, n: usize) -> Order {
     match order {
-        // Order::ASCENDING{c} => return (old_idx + 1, Order::ASCENDING{ count: c+1 }),
         Order::ASCENDING{count: c} => {
-            // let mut new = c / (n+1);
-            let mut new = c / n;
+            let new = c / n;
             return Order::ASCENDING { count: new };
         },
-        // Order::RANDOM       => return (rand::thread_rng().gen_range(0, usize::max_value()), order),
         _ => return order,
     }
 }
 
+/// A context-free grammar containing a set of rules. Can generate and return a
+/// set of words belonging to this grammar.
 #[derive(Clone)]
 pub struct ContextFreeGrammar {
     rules: Vec<CfgRule>,
@@ -68,10 +76,13 @@ impl ContextFreeGrammar {
         }
     }
 
+    /// Adds a `CfgRule` to the grammar
+    ///
+    /// Returns false(and outputs an error message) if something went wrong.
     pub fn add_rule(&mut self, rule: CfgRule) -> bool {
         // check for duplicates; two non-terminals are not allowed to be defined
         // multiple times and only one starting non-terminal can exist
-        let mut new_left = rule.get_left();
+        let new_left = rule.get_left();
 
         for nt in 0..self.non_terminals.len() {
             // duplicate
@@ -97,26 +108,13 @@ impl ContextFreeGrammar {
         true
     }
 
-    // pub fn is_ready(&self, verbose: bool) -> bool {
-    //     if self.start.is_none() {
-    //         if verbose { println!("Starting rule is missing"); }
-    //         return false;
-    //     }
-    //     // TODO check if rule exists for every nonterminal
-            //
-            // true
-    // }
-
-    // fn get_outcomes_for(&self, symbol: Symbol) -> Vec<SymbolChain> {
-    //     for r in self.rules {
-    //         if r.get_left().label == symbol.label {
-    //             return r.get_outcomes();
-    //         }
-    //     }
-    //
-    //     Vec::new()
-    // }
-
+    /// Generates the given amount of words from this grammar in the given order
+    /// and with the given max amount of non-terminal replacements(`max_depth`).
+    ///
+    /// If more different words are requested than are possible in this grammar,
+    /// this function will take much longer to terminate with ascending order.
+    /// In the case of random order duplicates are possible(and guaranteed given
+    /// a sufficiently large number of requested words).
     pub fn generate_strings(&self, mut order: Order, num: u32, max_depth: u32) -> Vec<String> {
         if self.start.is_none() {
             println!("Generating not possible: no starting non-terminal set");
@@ -127,34 +125,45 @@ impl ContextFreeGrammar {
         }
 
         let mut results = Vec::new();
-        // let mut idx = next_idx(order, 0);
 
         // look for starting point
-        let mut starting_idx = 0;
         for r in 0..self.rules.len() {
             let left = self.rules[r].get_left();
 
             if left.label == self.start.clone().unwrap().label {
-                starting_idx = r;
                 break;
             }
         }
 
         // generate `num` new strings
+        let mut successive_dupes = 0;
         let mut n = 0;
         while n < num {
-            let mut remaining_depth = max_depth;
+            let remaining_depth = max_depth;
 
             let result = self.generate(order, self.start.clone().unwrap(), remaining_depth);
-            let redundant = results.contains(&result);
-            if !redundant {
-                results.push(result);
-                n += 1;
+            // check for duplicates in ascending order
+            match order {
+                Order::ASCENDING { count: _ } => {   
+                    let redundant = results.contains(&result);
+                    if !redundant {
+                        results.push(result);
+                        n += 1;
+                        successive_dupes = 0;
+                    } else {
+                        successive_dupes += 1;
+                        if successive_dupes >= num { break; }
+                    }
+                },
+                _ => {
+                    results.push(result);
+                    n += 1;
+                },
             }
 
             order = match order {
                 Order::ASCENDING{count: c} => Order::ASCENDING { count: c+1 },
-                _                   => order,
+                _ => order,
             };
         }
 
@@ -165,7 +174,7 @@ impl ContextFreeGrammar {
         // return nothing if maximum depth was reached
         if rem == 0 { return "".to_string(); }
 
-        let mut idx = 0;
+        let idx;
 
         // look for rule that fits to given non-terminal
         let mut outcome = None;
@@ -217,27 +226,35 @@ impl CfgRule {
     /// The left side(one non-terminal) is sepated from the right side with "->".
     /// The right side consists of one or more possible outcomes, separated by a
     /// "|" symbol. The (non-)terminals within the rules are separated with any
-    /// other unused character(given as second parameter). Non-terminals should
+    /// other unused string(given as second parameter). Non-terminals should
     /// be preceded by a "!".
     ///
-    /// Examples: "A->a|a,b,B" "the-> /dog| /cat| /person"
+    /// Examples: "A->a|a,b,B" "the-> dog| cat| adjective, person"
     pub fn from_expression(expr: String, sym_separator: String, starting_rule: bool) -> Option<Self> {
-        if sym_separator == "|".to_string() { return None; }
+        if sym_separator == "|".to_string() ||
+                    sym_separator == "->".to_string() {
+            println!("'|' and '->' are not allowed as separators");
+            return None;
+        }
 
-        let sides: Vec<String> = expr.split("->").map(|s| s.to_string()).collect();
+        let sides: Vec<String> = expr.split("->")
+                                        .map(|s| s.to_string())
+                                        .collect();
         let left = sides[0].clone();
         let right = sides[1].clone();
 
         let mut outcomes = Vec::new();
-        let raw_outcomes: Vec<String> = right.split("|").map(|s| s.to_string()).collect();
+        let raw_outcomes: Vec<String> = right.split("|")
+                                                .map(|s| s.to_string())
+                                                .collect();
         for i in 0..raw_outcomes.len() {
             if raw_outcomes[i].len() == 0 { return None; }
 
             let mut symbols = Vec::new();
-            // let ro: &str = raw_outcomes[i].as_str();
             let ro = raw_outcomes[i].clone();
-            let words: Vec<String> = ro.split(sym_separator.as_str()).map(|s| s.to_string()).collect();
-            // let words = &raw_outcomes[i].split(sym_separator).collect();
+            let words: Vec<String> = ro.split(sym_separator.as_str())
+                                        .map(|s| s.to_string())
+                                        .collect();
             for n in 0..words.len() {
                 let mut word = words[n].clone();
                 if word.len() == 0 { return None; }
@@ -255,9 +272,11 @@ impl CfgRule {
             outcomes.push(chain);
         }
 
-        let left_symbol = Symbol { terminal: false, start: starting_rule, label: left };
-
-        // println!("{:?} -> {:?}", left_symbol, outcomes);
+        let left_symbol = Symbol {
+            terminal: false,
+            start: starting_rule,
+            label: left
+        };
 
         Some(CfgRule {
             left:       left_symbol,
@@ -265,9 +284,9 @@ impl CfgRule {
         })
     }
 
-    /// Returns the `SymbolChain` at the given index
+    /// Returns the `SymbolChain` at the given index.
     ///
-    /// If the index is out of bounds, loop around
+    /// The index cannot be out of bounds.
     fn get_outcome(&self, idx: usize) -> SymbolChain {
         let act_idx = idx % self.outcomes.len();
 
@@ -279,12 +298,9 @@ impl CfgRule {
     }
 
     fn get_left(&self) -> Symbol { self.left.clone() }
-
-    fn get_outcomes(&self) -> Vec<SymbolChain> {
-        self.outcomes.clone()
-    }
 }
 
+/// A string of non-terminals and terminals
 #[derive(Clone, Debug)]
 pub struct SymbolChain {
     pub symbols: Vec<Symbol>,
@@ -295,9 +311,5 @@ impl SymbolChain {
         SymbolChain {
             symbols: s,
         }
-    }
-
-    pub fn add_symbol(&mut self, c: Symbol) {
-        self.symbols.push(c);
     }
 }
