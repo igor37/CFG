@@ -17,7 +17,7 @@ the->The|A
 the2-> the| a
 adj-> quick| lazy| crazy| sleepy
 color-> brown| black| white| grey
-animal-> fox| dog| turtle| raccoon
+animal-> fox| dog| turtle| raccoon| panda
 action-> jumps over| runs around| jumps around| dances around
 
 # S->!article,!subject,!verb
