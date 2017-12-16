@@ -172,7 +172,7 @@ impl ContextFreeGrammar {
         let asc_str   = "ascending";
         let rnd_str   = "random";
         let sep_str   = "separator";
-        let num_str   = "words";
+        let num_str   = "results";
         let depth_str = "maxdepth";
 
         let line = l.replace("\n", "");
