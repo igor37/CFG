@@ -3,12 +3,14 @@
 CFG is a generator for phrases based on context-free grammars. Easy to use with calls
 from the command line.
 
-## Prerequisites
+## Getting started
+
+### Prerequisites
 
 For compiling the project the Rust compiler and Cargo are required.  
 See https://www.rust-lang.org/en-US/install.html for instructions
 
-## Getting started
+### Running the example
 
 After cloning/downloading the repository, simply switch into CFG's directory and compile with:
 
@@ -33,3 +35,7 @@ If everything went right the output using the example file should look a bit lik
   A quick grey dog jumps around the sleepy raccoon
 
   The sleepy white raccoon jumps over a lazy fox
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE.md](LICENSE.md) file for details
