@@ -16,13 +16,16 @@ After cloning/downloading the repository, simply switch into CFG's directory and
 
     cargo build --release
 
-This generates an executable file in the *target/release* subdirectory. This program has to be run with a file containing the
-rules of the context-free grammar. The repository already includes an example file for testing and getting familiar with the
-syntax:
+This generates an executable file in the *target/release* subdirectory.  
+The program has to be run with a file containing the rules of the context-free grammar. The repository already includes an example file for testing and getting familiar with the syntax. If you want to try it out right after compiling, execute the
+following command:
 
     target/release/cfg src/example_cfg -s
+    
+    # General syntax:
+    cfg <file path> [-s]
 
-With the -s flag all phrases are output with an empty line inbetween as spacing.
+With the optional -s flag all phrases are output with an empty line inbetween as spacing.
 If everything went right the output using the example file should look a bit like this:
 
     ...
